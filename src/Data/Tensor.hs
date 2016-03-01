@@ -2,16 +2,19 @@
 
 module Data.Tensor
 	( Tensor
+	, PrimBool
 	, fromList
 	, toList
 	, shape
 	, order
-	, constant
+	, const
 	, iota
 	, unary
 	, inner
 	, outer
 	, rotate
+	, foldl1
+	, contract
 	, sEqu
 	, sNeq
 	, sLeq
@@ -24,6 +27,7 @@ module Data.Tensor
 	, bImp
 	) where
 
+import Prelude hiding (const, foldl1)
 import qualified Data.List as List
 import Data.Word (Word8)
 import qualified Data.Bits as Bits
@@ -32,6 +36,8 @@ import qualified Data.Vector.Primitive as Vector
 
 data Tensor a = Tensor [Int] (Vector.Vector a)
 	deriving (Show, Eq)
+
+type PrimBool = Word8
 
 fromList :: Prim a => [Int] -> [a] -> Tensor a
 fromList shp vec =
@@ -52,8 +58,8 @@ shape (Tensor shp _) = shp
 order :: Tensor a -> Int
 order = List.length . shape
 
-constant :: Prim a => a -> [Int] -> Tensor a
-constant val shp = Tensor shp (Vector.replicate (product shp) val)
+const :: Prim a => a -> [Int] -> Tensor a
+const val shp = Tensor shp (Vector.replicate (product shp) val)
 
 iota :: Int -> [Int] -> Tensor Int
 iota val shp = Tensor shp (Vector.generate (product shp) (+ val))
@@ -95,6 +101,21 @@ rotate num ten@(Tensor shp vec) =
 				in Vector.unsafeIndex vec ((i1 * len1) + i2)
 			in Tensor (shp2 ++ shp1) (Vector.generate (len1 * len2) gen)
 
+foldl1 :: Prim a => (a -> a -> a) -> Int -> Tensor a -> Tensor a
+foldl1 fun num ten@(Tensor shp vec) =
+	if num <= 0 || Vector.length vec == 0 then ten
+	else if num >= List.length shp
+		then Tensor [] (Vector.singleton (Vector.foldl1' fun vec))
+	else let
+		(shp1, shp2) = List.splitAt num shp
+		len1 = product shp1
+		len2 = product shp2
+		gen3 i = Vector.foldl1' fun (Vector.unsafeSlice (i * len1) len1 vec)
+	in Tensor shp2 (Vector.generate len2 gen3)
+
+contract :: (Prim a, Prim b, Prim c) => (c -> c -> c) -> Int -> (a -> b -> c) -> Tensor a -> Tensor b -> Tensor c
+contract fun1 num fun2 ten1 ten2 = undefined
+
 sEqu :: Eq a => a -> a -> Word8
 sEqu x y = if x == y then 1 else 0
 
@@ -107,20 +128,20 @@ sLeq x y = if x <= y then 1 else 0
 sLess :: Ord a => a -> a -> Word8
 sLess x y = if x < y then 1 else 0
 
-bNeg :: Word8 -> Word8
+bNeg :: PrimBool -> PrimBool
 bNeg = Bits.complement
 
-bAnd :: Word8 -> Word8 -> Word8
+bAnd :: PrimBool -> PrimBool -> PrimBool
 bAnd = (Bits..&.)
 
-bOr :: Word8 -> Word8 -> Word8
+bOr :: PrimBool -> PrimBool -> PrimBool
 bOr = (Bits..|.)
 
-bAdd :: Word8 -> Word8 -> Word8
+bAdd :: PrimBool -> PrimBool -> PrimBool
 bAdd = Bits.xor
 
-bEqu :: Word8 -> Word8 -> Word8
+bEqu :: PrimBool -> PrimBool -> PrimBool
 bEqu x y = Bits.complement (Bits.xor x y)
 
-bImp :: Word8 -> Word8 -> Word8
+bImp :: PrimBool -> PrimBool -> PrimBool
 bImp x y = (Bits..|.) (Bits.complement x) y
