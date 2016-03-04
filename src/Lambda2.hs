@@ -4,11 +4,14 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Lambda where
 
-import Data.Foldable (Foldable)
-import qualified Data.Foldable as Foldable
+import Control.Applicative (Applicative, pure, (<*>), liftA)
+import Data.Traversable (Traversable, sequenceA)
+import Data.Foldable (Foldable, foldl')
 
 -- compiled program
 
@@ -25,45 +28,59 @@ isClosed :: (Functor node, Foldable node) => Int -> Term node -> Bool
 isClosed lev (TermVar idx) = idx < lev
 isClosed lev (TermLam sub) = isClosed (lev + 1) sub
 isClosed lev (TermApp sub1 sub2)
-	= (isClosed lev sub1) && (isClosed lev sub2)
+	= isClosed lev sub1 && isClosed lev sub2
 isClosed lev (TermNode sub)
-	= Foldable.foldl' (&&) True (fmap (isClosed lev) sub)
+	= foldl' (&&) True (fmap (isClosed lev) sub)
 
 -- basic datatype and ops
 
-class (Functor node, Foldable node) => Evaluable node val where
-	evaluate :: node val -> val
-
-data Node sub
+data Node arg
 	= NodeLit Int
-	| NodeAdd sub sub
-	| NodeMul sub sub
-	deriving (Show, Eq, Functor, Foldable)
+	| NodeNeg arg
+	| NodeAdd arg arg
+	| NodeMul arg arg
+	deriving (Show, Eq, Functor, Foldable, Traversable)
 
-instance Evaluable Node Int where
-	evaluate (NodeLit arg) = arg
-	evaluate (NodeAdd arg1 arg2) = arg1 + arg2
-	evaluate (NodeMul arg1 arg2) = arg1 * arg2
+instance Calculus Node Int where
+	calculate (NodeLit arg) = arg
+	calculate (NodeNeg arg) = negate arg
+	calculate (NodeAdd arg1 arg2) = arg1 + arg2
+	calculate (NodeMul arg1 arg2) = arg1 * arg2
 
--- runtime values
+--instance Traversable node => Calculus node (Term node) where
+--	calculate node = TermNode node
 
-data Value node val
-	= Value val
-	| Closure [Value node val] (Term node)
+-- runtime data
 
-execute :: (Functor node, Evaluable node val) => [Value node val] -> Term node -> Value node val
+class Traversable node => Calculus node val where
+	calculate :: node val -> val
+
+data Data node val
+	= DataVal val
+	| DataErr String
+	| Closure [Data node val] (Term node)
+
+deriving instance (Show (Term node), Show val) => Show (Data node val)
+deriving instance (Eq (Term node), Eq val) => Eq (Data node val)
+deriving instance Functor (Data node)
+
+instance Applicative (Data node) where
+	pure = DataVal
+	(DataVal fun) <*> arg = fmap fun arg
+	(DataErr err) <*> _ = DataErr err
+	(Closure _ _) <*> _ = DataErr "not primitive"
+
+execute :: Calculus node val => [Data node val] -> Term node -> Data node val
 execute env (TermVar idx)
 	= if idx < length env
 		then env !! idx
-		else error "invalid variable"
+		else DataErr "invalid variable"
 execute env (TermLam term)
 	= Closure env term
 execute env (TermApp fun arg)
 	= case execute env fun of
-		Closure e t -> execute ((execute env arg) : e) t
-		Value _ -> error "not applicable"
+		Closure e t -> execute (execute env arg : e) t
+		DataVal _ -> DataErr "not applicable"
+		e@(DataErr _) -> e
 execute env (TermNode node)
-	= let
-		peel (Value v) = v
-		peel (Closure _ _) = error "not primitive"
-	in Value (evaluate (fmap (peel . (execute env)) node))
+	= liftA calculate (sequenceA (fmap (execute env) node))

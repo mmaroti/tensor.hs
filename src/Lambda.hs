@@ -15,10 +15,10 @@ isClosed :: Term val -> Int -> Bool
 isClosed (TermVar idx) lev = idx < lev
 isClosed (TermLam sub) lev = isClosed sub (lev + 1)
 isClosed (TermApp sub1 sub2) lev
-	= (isClosed sub1 lev) && (isClosed sub2 lev)
+	= isClosed sub1 lev && isClosed sub2 lev
 isClosed (TermLit _) _ = True
 isClosed (TermPrm _ sub1 sub2) lev
-	= (isClosed sub1 lev) && (isClosed sub2 lev)
+	= isClosed sub1 lev && isClosed sub2 lev
 
 -- runtime values
 
@@ -35,7 +35,7 @@ execute (TermLam term) env
 	= Closure term env
 execute (TermApp fun arg) env
 	= case execute fun env of
-		Closure t e -> execute t ((execute arg env) : e)
+		Closure t e -> execute t (execute arg env : e)
 		Value _ -> error "not applicable"
 execute (TermLit val) _ = Value val
 execute (TermPrm fun arg1 arg2) env
